@@ -12,7 +12,7 @@ enum GameState { aiming, dead }
 
 class OneMoreGame extends FlameGame with TapCallbacks {
   static const double baseSpeed = 240.0;
-  static const double jitterAmp = 0.03;
+  static const double jitterAmp = 0.035; // Increased from 0.03 to 0.035
   static const double jitterFreq = 0.45;
   static const double radiusStart = 50.0;
   static const double radiusMin = 15.0;
@@ -60,7 +60,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   final TextPaint tapToRetryPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: Colors.black.withOpacity(0.5),
+      color: Colors.black.withValues(alpha: 0.5),
       fontSize: S * 0.35,
       fontWeight: FontWeight.normal,
     ),
@@ -76,7 +76,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   final TextPaint bestPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: Colors.black.withOpacity(0.7),
+      color: Colors.black.withValues(alpha: 0.7),
       fontSize: S * 0.55,
       fontWeight: FontWeight.normal,
     ),
@@ -119,7 +119,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     score = 0;
     hits = 0;
     t = 0;
-    phaseOffset = _rng.nextDouble() * pi * 2;
+    phaseOffset = _rng.nextDouble() * pi * 3; // Range expanded to [0, 3π]
     arrowX = 0;
     _popCountdown = 0;
     _scorePopCountdown = 0;
@@ -202,11 +202,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
     // Layout constants
     const double S = OneMoreGame.S;
-    final double radiusStart = OneMoreGame.radiusStart;
+    const double radiusStart = OneMoreGame.radiusStart;
     
-    final double oneMoreFontSize = S * 0.85;
-    final double bestFontSize = S * 0.55;
-    final double nextFontSize = S * 0.60;
+    const double oneMoreFontSize = S * 0.85;
+    const double bestFontSize = S * 0.55;
+    const double nextFontSize = S * 0.60;
     
     // Reference Point: CenterY = screenHeight * 0.5
     final double centerY = size.y * 0.5;
@@ -278,9 +278,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
     final double visualR = _radius();
     // effectiveRadius = visualRadius * (1 - microBias)
-    // microBias ∈ [0, 0.12]
+    // microBias ∈ [0, 0.15]
     // Increases slowly with score (approx max at score 60)
-    final double microBias = clamp(score * 0.002, 0.0, 0.12);
+    final double microBias = clamp(score * 0.002, 0.0, 0.15);
     final double effectiveR = visualR * (1 - microBias);
     
     final dist = dx.abs();
