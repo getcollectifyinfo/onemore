@@ -189,6 +189,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
            _ghostTapTimer = 1.4; // Increased to 1.4s (Double of 0.7s)
            _ghostTapShown = true;
         }
+      } else if (dx > 20.0) {
+        // Reset flags when arrow moves away so it can flash again on next pass
+        // This allows the animation to repeat until the user interacts
+        _flashedOnce = false;
+        _ghostTapShown = false;
       }
     }
     
