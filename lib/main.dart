@@ -68,8 +68,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   final TextPaint tinyPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: const Color(0xFF00AA00),
-      fontSize: 18,
+      color: Colors.black.withValues(alpha: 0.6),
+      fontSize: S * 0.45,
       fontWeight: FontWeight.normal,
     ),
   );
@@ -240,15 +240,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     scorePaint.render(canvas, '$score', Vector2(cx, scoreY), anchor: Anchor.topCenter);
     
     if (_scorePopCountdown > 0 && _lastScoreText != null) {
-      final tp = TextPainter(
-        text: TextSpan(text: '$score', style: scorePaint.style),
-        textDirection: TextDirection.ltr,
-      );
-      tp.layout();
-      final scoreWidth = tp.width;
-      
-      // Position pop text to the right of SCORE (adjusted for top anchor)
-      tinyPaint.render(canvas, _lastScoreText!, Vector2(cx + (scoreWidth / 2) + 8, scoreY + 8));
+      // Position above SCORE (scoreY is top of score text)
+      // No animation, just static fade (controlled by opacity in paint)
+      tinyPaint.render(canvas, _lastScoreText!, Vector2(cx, scoreY - 4), anchor: Anchor.bottomCenter);
     }
 
     if (state == GameState.dead) {
@@ -296,8 +290,16 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       
       score += inc;
       hits++;
-      _lastScoreText = '+$inc';
-      _scorePopCountdown = 45;
+      
+      _lastScoreText = null;
+      // Condition: inc > 1 (never show +1), score >= 15, ~25% chance
+      if (inc > 1 && score >= 15 && _rng.nextDouble() < 0.25) {
+        _lastScoreText = '+$inc';
+        _scorePopCountdown = 9; // ~150ms at 60fps
+      } else {
+        _scorePopCountdown = 0;
+      }
+
       _popCountdown = 2;
     } else {
       final margin = dist - effectiveR;
