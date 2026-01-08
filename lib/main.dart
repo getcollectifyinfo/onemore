@@ -237,11 +237,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Tap to try again (Below NEXT)
     final double tryAgainY = nextY + nextFontSize + 24;
 
-    scorePaint.render(canvas, 'SCORE $score', Vector2(cx, scoreY), anchor: Anchor.topCenter);
+    scorePaint.render(canvas, '$score', Vector2(cx, scoreY), anchor: Anchor.topCenter);
     
     if (_scorePopCountdown > 0 && _lastScoreText != null) {
       final tp = TextPainter(
-        text: TextSpan(text: 'SCORE $score', style: scorePaint.style),
+        text: TextSpan(text: '$score', style: scorePaint.style),
         textDirection: TextDirection.ltr,
       );
       tp.layout();
@@ -302,9 +302,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     } else {
       final margin = dist - effectiveR;
       nearMissText = null;
-      if (margin <= nearMissThreshold) {
-        final speed = _speed();
-        final timeDiff = margin / speed;
+      
+      final speed = _speed();
+      final timeDiff = margin / speed;
+      
+      if (timeDiff <= 0.06) {
         final timeStr = timeDiff.toStringAsFixed(3);
         
         final isEarly = dx < 0;
