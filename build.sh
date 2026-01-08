@@ -3,18 +3,20 @@ set -e
 
 echo "Current directory: $(pwd)"
 
-# Install Flutter if not present
-if [ -d "flutter" ]; then
-  echo "Flutter directory exists. Skipping clone."
-else
-  echo "Installing Flutter..."
-  git clone https://github.com/flutter/flutter.git -b stable --depth 1
-fi
+# Force fresh install to ensure no cache issues with old versions
+rm -rf flutter
 
-export PATH="$PATH:$(pwd)/flutter/bin"
+echo "Installing Flutter..."
+git clone https://github.com/flutter/flutter.git -b stable --depth 1
+
+# IMPORTANT: Prepend to PATH to ensure we use this flutter, not any system-installed one
+export PATH="$(pwd)/flutter/bin:$PATH"
 
 echo "Flutter version:"
 flutter --version
+
+echo "Flutter Doctor:"
+flutter doctor
 
 echo "Enabling web support..."
 flutter config --enable-web
