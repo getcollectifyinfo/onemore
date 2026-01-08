@@ -32,8 +32,15 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   int _scorePopCountdown = 0;
   String? _lastScoreText;
   int score = 0;
+  double effectiveScore = 0;
   int bestScore = 0;
   int hits = 0;
+  bool hasPlayed = false;
+  double _flashOpacity = 0.0;
+  bool _flashedOnce = false;
+  double _ghostTapOpacity = 0.0;
+  bool _ghostTapShown = false;
+  double _ghostTapTimer = 0.0;
   GameState state = GameState.aiming;
   String? nearMissText;
 
@@ -103,6 +110,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _rng = Random();
     final prefs = await SharedPreferences.getInstance();
     bestScore = prefs.getInt('bestScore') ?? 0;
+    hasPlayed = prefs.getBool('hasPlayed') ?? false;
     reset();
   }
 
@@ -114,9 +122,18 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     }
   }
 
+  Future<void> _setHasPlayed() async {
+    if (!hasPlayed) {
+      hasPlayed = true;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('hasPlayed', true);
+    }
+  }
+
   void reset() {
     state = GameState.aiming;
     score = 0;
+    effectiveScore = 0;
     hits = 0;
     t = 0;
     phaseOffset = _rng.nextDouble() * pi * 3; // Range expanded to [0, 3π]
@@ -125,6 +142,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _scorePopCountdown = 0;
     _lastScoreText = null;
     nearMissText = null;
+    _flashOpacity = 0.0;
+    _flashedOnce = false;
+    _ghostTapOpacity = 0.0;
+    _ghostTapShown = false;
+    _ghostTapTimer = 0.0;
     arrowY = size.y * 0.9;
     targetY = size.y * 0.5;
   }
@@ -143,15 +165,55 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   }
 
   double _radius() {
-    if (hits <= 3) {
-      return radiusStart;
-    }
-    return max(radiusStart - ((hits - 3) * k), radiusMin);
+    return max(radiusStart - (effectiveScore * k), radiusMin);
   }
 
   @override
   void update(double dt) {
     super.update(dt);
+    
+    // Flash logic for first run
+    if (!hasPlayed && state == GameState.aiming) {
+      final cx = size.x * 0.5;
+      final dx = (arrowX - cx).abs();
+      // Check if arrow is very close to center (e.g. within 2 pixels)
+      if (dx < 2.0) {
+        if (!_flashedOnce) {
+          _flashOpacity = 0.08; // 5-8% opacity
+          _flashedOnce = true;
+        }
+        
+        // Trigger Ghost Tap simultaneously with flash
+        if (!_ghostTapShown) {
+           _ghostTapOpacity = 0.07; // 5-7% opacity
+           _ghostTapTimer = 0.7; // 700ms duration
+           _ghostTapShown = true;
+        }
+      }
+    }
+    
+    if (_flashOpacity > 0) {
+      _flashOpacity -= dt * 2.0; // Fade out quickly
+      if (_flashOpacity < 0) _flashOpacity = 0;
+    }
+    
+    // Ghost Tap fade out logic
+    if (_ghostTapTimer > 0) {
+      _ghostTapTimer -= dt;
+      if (_ghostTapTimer <= 0) {
+        // Start fading out after timer ends? Or fade out during timer?
+        // User said: Duration 500-700ms, Fade-out linear. 
+        // Let's assume it stays for a bit then fades, or fades over the duration.
+        // "Fade-out: lineer" usually implies it fades out over time.
+        // Let's make it fade out over the last part of the timer or just use timer as opacity driver?
+        // User: "Süre: 500–700 ms", "Fade-out: lineer".
+        // Let's fade out linearly over the whole duration.
+        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 0.7);
+      } else {
+        _ghostTapOpacity = 0;
+      }
+    }
+
     if (state == GameState.aiming) {
       final v = _speed();
       arrowX += v * dt;
@@ -258,6 +320,30 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       
       tapToRetryPaint.render(canvas, 'tap to try again', Vector2(cx, tryAgainY), anchor: Anchor.topCenter);
     }
+    
+    // Render flash overlay if active
+    if (_flashOpacity > 0) {
+      canvas.drawRect(
+        Rect.fromLTWH(0, 0, size.x, size.y),
+        Paint()..color = Colors.white.withValues(alpha: _flashOpacity),
+      );
+    }
+    
+    // Render Ghost Tap
+    if (_ghostTapOpacity > 0) {
+      final double ghostRadius = r * 0.35;
+      final double ghostX = cx + (r * 0.9);
+      final double ghostY = cyTarget + (r * 0.6);
+      
+      canvas.drawCircle(
+        Offset(ghostX, ghostY),
+        ghostRadius,
+        Paint()
+          ..color = Colors.black.withValues(alpha: _ghostTapOpacity)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1,
+      );
+    }
   }
 
   @override
@@ -280,6 +366,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     final dist = dx.abs();
     
     if (dist <= effectiveR) {
+      // Successful hit
+      if (!hasPlayed) {
+        _setHasPlayed();
+      }
+      
       final d = dist / effectiveR;
       int inc = 1;
       if (d <= 0.33) {
@@ -289,6 +380,16 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       }
       
       score += inc;
+      
+      // Update effectiveScore based on difficulty rules
+      if (score <= 10) {
+        // No increase
+      } else if (score <= 30) {
+        effectiveScore += 0.5;
+      } else {
+        effectiveScore += 1.0;
+      }
+      
       hits++;
       
       _lastScoreText = null;
@@ -302,6 +403,16 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
       _popCountdown = 2;
     } else {
+      // Miss logic
+      if (!hasPlayed) {
+        // Soft penalty for first run: Vibrate only, no game over, no score
+        HapticFeedback.lightImpact();
+        _setHasPlayed(); // Mark as played so next miss is Game Over
+        return;
+      }
+      
+      _setHasPlayed(); // Ensure it's marked (redundant but safe)
+      
       final margin = dist - effectiveR;
       nearMissText = null;
       
