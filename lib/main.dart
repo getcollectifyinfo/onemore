@@ -172,65 +172,62 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   void update(double dt) {
     super.update(dt);
     
-    // Flash logic (Debug: always active for now)
     if (state == GameState.aiming) {
       final cx = size.x * 0.5;
-      final dx = (arrowX - cx).abs();
-      // Increased threshold to 5.0 to ensure it catches the arrow passing center
-      if (dx < 5.0) {
-        if (!_flashedOnce) {
-          _flashOpacity = 0.08; // 5-8% opacity
-          _flashedOnce = true;
-        }
-        
-        // Trigger Ghost Tap simultaneously with flash
-        if (!_ghostTapShown) {
-           _ghostTapOpacity = 0.07; // 5-7% opacity
-           _ghostTapTimer = 1.4; // 1.4s duration
-           _ghostTapShown = true;
-        }
-      } else if (dx > 20.0) {
-        // Reset flags when arrow moves away so it can flash again on next pass
-        // This allows the animation to repeat until the user interacts
-        _flashedOnce = false;
-        _ghostTapShown = false;
-      }
-    }
-    
-    if (_flashOpacity > 0) {
-      _flashOpacity -= dt * 1.0; // Slower fade (Double duration of previous)
-      if (_flashOpacity < 0) _flashOpacity = 0;
-    }
-    
-    // Ghost Tap fade out logic
-    if (_ghostTapTimer > 0) {
-      _ghostTapTimer -= dt;
-      if (_ghostTapTimer <= 0) {
-        // Start fading out after timer ends? Or fade out during timer?
-        // User said: Duration 500-700ms, Fade-out linear. 
-        // Let's assume it stays for a bit then fades, or fades over the duration.
-        // "Fade-out: lineer" usually implies it fades out over time.
-        // Let's make it fade out over the last part of the timer or just use timer as opacity driver?
-        // User: "Süre: 500–700 ms", "Fade-out: lineer".
-        // Let's fade out linearly over the whole duration.
-        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 1.4);
-      } else {
-        _ghostTapOpacity = 0;
-      }
-    }
-
-    if (state == GameState.aiming) {
+      final double oldArrowX = arrowX;
+      
       final v = _speed();
       arrowX += v * dt;
       if (arrowX > size.x) {
         arrowX -= size.x;
       }
+      
+      // Check if arrow crossed the center in this frame
+      // Logic: It was left of center before, and is at or right of center now
+      // (ignoring wrap-around case since center is middle of screen)
+      bool crossedCenter = (oldArrowX < cx && arrowX >= cx);
+      
+      if (crossedCenter) {
+        // Flash logic (Always active for debug)
+        if (!_flashedOnce) {
+          _flashOpacity = 0.08; // 5-8% opacity
+          _flashedOnce = true;
+        }
+        
+        // Trigger Ghost Tap
+        if (!_ghostTapShown) {
+           _ghostTapOpacity = 0.07; // 5-7% opacity
+           _ghostTapTimer = 1.4; // 1.4s duration
+           _ghostTapShown = true;
+        }
+      } else if (arrowX > cx + 20.0) {
+        // Reset flags when arrow moves away so it can flash again on next pass
+        _flashedOnce = false;
+        _ghostTapShown = false;
+      }
+      
       t += dt;
       if (_popCountdown > 0) {
         _popCountdown--;
       }
       if (_scorePopCountdown > 0) {
         _scorePopCountdown--;
+      }
+    }
+    
+    if (_flashOpacity > 0) {
+      _flashOpacity -= dt * 1.0; 
+      if (_flashOpacity < 0) _flashOpacity = 0;
+    }
+    
+    // Ghost Tap fade out logic
+    if (_ghostTapTimer > 0) {
+      _ghostTapTimer -= dt;
+      if (_ghostTapTimer > 0) {
+        // Linear fade out based on remaining time
+        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 1.4);
+      } else {
+        _ghostTapOpacity = 0;
       }
     }
   }
