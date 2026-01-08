@@ -186,14 +186,14 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         // Trigger Ghost Tap simultaneously with flash
         if (!_ghostTapShown) {
            _ghostTapOpacity = 0.07; // 5-7% opacity
-           _ghostTapTimer = 0.7; // 700ms duration
+           _ghostTapTimer = 1.4; // Increased to 1.4s (Double of 0.7s)
            _ghostTapShown = true;
         }
       }
     }
     
     if (_flashOpacity > 0) {
-      _flashOpacity -= dt * 2.0; // Fade out quickly
+      _flashOpacity -= dt * 1.0; // Slower fade (Double duration of previous)
       if (_flashOpacity < 0) _flashOpacity = 0;
     }
     
@@ -208,7 +208,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         // Let's make it fade out over the last part of the timer or just use timer as opacity driver?
         // User: "Süre: 500–700 ms", "Fade-out: lineer".
         // Let's fade out linearly over the whole duration.
-        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 0.7);
+        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 1.4);
       } else {
         _ghostTapOpacity = 0;
       }
