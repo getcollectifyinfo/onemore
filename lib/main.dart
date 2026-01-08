@@ -172,12 +172,12 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   void update(double dt) {
     super.update(dt);
     
-    // Flash logic for first run
-    if (!hasPlayed && state == GameState.aiming) {
+    // Flash logic (Debug: always active for now)
+    if (state == GameState.aiming) {
       final cx = size.x * 0.5;
       final dx = (arrowX - cx).abs();
-      // Check if arrow is very close to center (e.g. within 2 pixels)
-      if (dx < 2.0) {
+      // Increased threshold to 5.0 to ensure it catches the arrow passing center
+      if (dx < 5.0) {
         if (!_flashedOnce) {
           _flashOpacity = 0.08; // 5-8% opacity
           _flashedOnce = true;
@@ -186,7 +186,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         // Trigger Ghost Tap simultaneously with flash
         if (!_ghostTapShown) {
            _ghostTapOpacity = 0.07; // 5-7% opacity
-           _ghostTapTimer = 1.4; // Increased to 1.4s (Double of 0.7s)
+           _ghostTapTimer = 1.4; // 1.4s duration
            _ghostTapShown = true;
         }
       } else if (dx > 20.0) {
