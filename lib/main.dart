@@ -6,6 +6,7 @@ import 'package:flame/game.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 enum GameState { aiming, dead }
 
@@ -23,7 +24,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   late final Random _rng;
   double t = 0;
-  double jitterPhase = 0;
+  double phaseOffset = 0;
   double arrowX = 0;
   double arrowY = 0;
   double targetY = 0;
@@ -31,32 +32,36 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   int _scorePopCountdown = 0;
   String? _lastScoreText;
   int score = 0;
+  int bestScore = 0;
+  int hits = 0;
   GameState state = GameState.aiming;
   String? nearMissText;
 
   final Paint bg = Paint()..color = const Color(0xFFFFFFFF);
   final Paint fg = Paint()..color = const Color(0xFF000000);
 
+  static const double S = 24.0; // Score font size reference
+
   final TextPaint scorePaint = TextPaint(
     style: GoogleFonts.inter(
       color: Colors.black,
-      fontSize: 24,
+      fontSize: S,
       fontWeight: FontWeight.w600,
     ),
   );
 
-  final TextPaint bigPaint = TextPaint(
+  final TextPaint oneMorePaint = TextPaint(
     style: GoogleFonts.inter(
       color: Colors.black,
-      fontSize: 20,
+      fontSize: S * 0.85,
       fontWeight: FontWeight.bold,
     ),
   );
 
-  final TextPaint smallPaint = TextPaint(
+  final TextPaint tapToRetryPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: Colors.grey,
-      fontSize: 9,
+      color: Colors.black.withOpacity(0.5),
+      fontSize: S * 0.35,
       fontWeight: FontWeight.normal,
     ),
   );
@@ -64,15 +69,31 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   final TextPaint tinyPaint = TextPaint(
     style: GoogleFonts.inter(
       color: const Color(0xFF00AA00),
-      fontSize: 9,
+      fontSize: 18,
       fontWeight: FontWeight.normal,
+    ),
+  );
+
+  final TextPaint bestPaint = TextPaint(
+    style: GoogleFonts.inter(
+      color: Colors.black.withOpacity(0.7),
+      fontSize: S * 0.55,
+      fontWeight: FontWeight.normal,
+    ),
+  );
+
+  final TextPaint nextPaint = TextPaint(
+    style: GoogleFonts.inter(
+      color: Colors.black,
+      fontSize: S * 0.60,
+      fontWeight: FontWeight.w600,
     ),
   );
 
   final TextPaint nearMissPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: Colors.black,
-      fontSize: 11,
+      color: const Color(0xFF333333), // Dark grey
+      fontSize: S * 0.45,
       fontWeight: FontWeight.normal,
     ),
   );
@@ -80,29 +101,52 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   @override
   Future<void> onLoad() async {
     _rng = Random();
+    final prefs = await SharedPreferences.getInstance();
+    bestScore = prefs.getInt('bestScore') ?? 0;
     reset();
+  }
+
+  Future<void> _updateBestScore() async {
+    if (score > bestScore) {
+      bestScore = score;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('bestScore', bestScore);
+    }
   }
 
   void reset() {
     state = GameState.aiming;
     score = 0;
+    hits = 0;
     t = 0;
-    jitterPhase = _rng.nextDouble() * pi * 2;
+    phaseOffset = _rng.nextDouble() * pi * 2;
     arrowX = 0;
     _popCountdown = 0;
     _scorePopCountdown = 0;
     _lastScoreText = null;
     nearMissText = null;
     arrowY = size.y * 0.9;
-    targetY = size.y * 0.35;
+    targetY = size.y * 0.5;
   }
 
   double _speed() {
-    return baseSpeed * (1 + jitterAmp * sin(jitterPhase + t * 2 * pi * jitterFreq));
+    // effectiveSpeed(t) = baseSpeed * (1 + ε(t))
+    // ε(t) = soft wave with amplitude ±2.5% - 3%
+    // Using composite sine wave to break rhythm (Perlin-like feel)
+    final double t1 = t * 2 * pi * jitterFreq;
+    final double t2 = t * 2 * pi * (jitterFreq * 1.5); // Second frequency component
+    
+    // Combine two waves and normalize roughly
+    final double wave = (sin(phaseOffset + t1) + 0.5 * sin(phaseOffset + t2)) / 1.5;
+    
+    return baseSpeed * (1 + jitterAmp * wave);
   }
 
   double _radius() {
-    return max(radiusStart - (score * k), radiusMin);
+    if (hits <= 3) {
+      return radiusStart;
+    }
+    return max(radiusStart - ((hits - 3) * k), radiusMin);
   }
 
   @override
@@ -156,36 +200,69 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     );
     canvas.drawRect(arrowRect, fg);
 
-    scorePaint.render(canvas, 'SCORE $score', Vector2(12, 16));
+    // Layout constants
+    const double S = OneMoreGame.S;
+    final double radiusStart = OneMoreGame.radiusStart;
+    
+    final double oneMoreFontSize = S * 0.85;
+    final double bestFontSize = S * 0.55;
+    final double nextFontSize = S * 0.60;
+    
+    // Reference Point: CenterY = screenHeight * 0.5
+    final double centerY = size.y * 0.5;
+    
+    // ONE MORE (Fixed Anchor - Top)
+    // Distance from Target Top to One More Bottom = S * 0.9
+    // Target Top = CenterY - radiusStart
+    // One More Bottom = (CenterY - radiusStart) - (S * 0.9)
+    final double oneMoreY = (centerY - radiusStart) - (S * 0.9);
+    
+    // SCORE (Fixed Anchor - Bottom)
+    // Distance from Target Bottom to Score Top = S
+    // Target Bottom = CenterY + radiusStart
+    // Score Top = (CenterY + radiusStart) + S
+    final double scoreY = (centerY + radiusStart) + S;
+    
+    // Near-miss (Above ONE MORE)
+    final double nearMissY = oneMoreY - oneMoreFontSize - 12;
+    
+    // BEST (Below SCORE)
+    final double bestY = scoreY + S + 8;
+    
+    // NEXT (Below BEST)
+    // next = ((score ~/ 10) + 1) * 10
+    final int nextScore = ((score ~/ 10) + 1) * 10;
+    final double nextY = bestY + bestFontSize + 8;
+    
+    // Tap to try again (Below NEXT)
+    final double tryAgainY = nextY + nextFontSize + 24;
+
+    scorePaint.render(canvas, 'SCORE $score', Vector2(cx, scoreY), anchor: Anchor.topCenter);
+    
     if (_scorePopCountdown > 0 && _lastScoreText != null) {
-      tinyPaint.render(canvas, _lastScoreText!, Vector2(140, 24));
+      final tp = TextPainter(
+        text: TextSpan(text: 'SCORE $score', style: scorePaint.style),
+        textDirection: TextDirection.ltr,
+      );
+      tp.layout();
+      final scoreWidth = tp.width;
+      
+      // Position pop text to the right of SCORE (adjusted for top anchor)
+      tinyPaint.render(canvas, _lastScoreText!, Vector2(cx + (scoreWidth / 2) + 8, scoreY + 8));
     }
 
     if (state == GameState.dead) {
-      const double oneMoreFontSize = 20.0;
-      
-      // ONE MORE position
-      // Space between target top and ONE MORE bottom = 0.7 * r
-      final double gapTarget = r * 0.70; 
-      final double oneMoreY = cyTarget - r - gapTarget;
-
-      bigPaint.render(canvas, 'ONE MORE', Vector2(cx, oneMoreY), anchor: Anchor.bottomCenter);
+      oneMorePaint.render(canvas, 'ONE MORE', Vector2(cx, oneMoreY), anchor: Anchor.bottomCenter);
       
       if (nearMissText != null) {
-        // Near-miss position
-        // Space between ONE MORE top and Near-miss bottom = 0.9 * ONE_MORE_font
-        const double gapOneMore = oneMoreFontSize * 0.9;
-        final double nearMissY = (oneMoreY - oneMoreFontSize) - gapOneMore;
-        
         nearMissPaint.render(canvas, nearMissText!, Vector2(cx, nearMissY), anchor: Anchor.bottomCenter);
       }
       
-      // Tap to try again position
-      // Space between target bottom and text top = 0.6 * r
-      final double gapTry = r * 0.6;
-      final double tryAgainY = cyTarget + r + gapTry;
+      // Render BEST and NEXT
+      bestPaint.render(canvas, 'BEST: $bestScore', Vector2(cx, bestY), anchor: Anchor.topCenter);
+      nextPaint.render(canvas, 'NEXT: $nextScore', Vector2(cx, nextY), anchor: Anchor.topCenter);
       
-      smallPaint.render(canvas, 'tap to try again', Vector2(cx, tryAgainY), anchor: Anchor.topCenter);
+      tapToRetryPaint.render(canvas, 'tap to try again', Vector2(cx, tryAgainY), anchor: Anchor.topCenter);
     }
   }
 
@@ -199,7 +276,13 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     final cx = size.x * 0.5;
     final dx = arrowX - cx;
 
-    double effectiveR = _radius();
+    final double visualR = _radius();
+    // effectiveRadius = visualRadius * (1 - microBias)
+    // microBias ∈ [0, 0.12]
+    // Increases slowly with score (approx max at score 60)
+    final double microBias = clamp(score * 0.002, 0.0, 0.12);
+    final double effectiveR = visualR * (1 - microBias);
+    
     final dist = dx.abs();
     
     if (dist <= effectiveR) {
@@ -212,6 +295,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       }
       
       score += inc;
+      hits++;
       _lastScoreText = '+$inc';
       _scorePopCountdown = 45;
       _popCountdown = 2;
@@ -229,6 +313,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         nearMissText = '${timeStr}s $suffix';
       }
       state = GameState.dead;
+      _updateBestScore();
     }
   }
 
