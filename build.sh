@@ -17,4 +17,8 @@ echo "Building web app..."
 # Build with CanvasKit renderer for better performance in games
 flutter build web --release --web-renderer canvaskit
 
-echo "Build complete."
+echo "Build complete. Listing build directory:"
+ls -R build/web
+
+echo "Current directory:"
+pwd
