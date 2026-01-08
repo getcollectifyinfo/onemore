@@ -3,30 +3,41 @@ set -e
 
 echo "Current directory: $(pwd)"
 
-# Force fresh install to ensure no cache issues with old versions
+# Define Flutter binary path explicitly
+FLUTTER_ROOT="$(pwd)/flutter"
+FLUTTER_BIN="$FLUTTER_ROOT/bin/flutter"
+
+# Force fresh install
 rm -rf flutter
 
 echo "Installing Flutter..."
 git clone https://github.com/flutter/flutter.git -b stable --depth 1
 
-# IMPORTANT: Prepend to PATH to ensure we use this flutter, not any system-installed one
-export PATH="$(pwd)/flutter/bin:$PATH"
+echo "Verifying Flutter binary..."
+if [ ! -f "$FLUTTER_BIN" ]; then
+  echo "Error: Flutter binary not found at $FLUTTER_BIN"
+  exit 1
+fi
+
+# Export path just in case, but we will use FLUTTER_BIN variable
+export PATH="$FLUTTER_ROOT/bin:$PATH"
 
 echo "Flutter version:"
-flutter --version
-
-echo "Flutter Doctor:"
-flutter doctor
+"$FLUTTER_BIN" --version
 
 echo "Enabling web support..."
-flutter config --enable-web
+"$FLUTTER_BIN" config --enable-web
+
+echo "Cleaning..."
+"$FLUTTER_BIN" clean
 
 echo "Getting dependencies..."
-flutter pub get
+"$FLUTTER_BIN" pub get
 
 echo "Building web app..."
-# Build with CanvasKit renderer for better performance in games
-flutter build web --release --web-renderer canvaskit
+# Removing --web-renderer flag temporarily to resolve "option not found" error.
+# Default behavior is 'auto' which is fine for now.
+"$FLUTTER_BIN" build web --release
 
 echo "Build complete. Checking output..."
 if [ -d "build/web" ]; then
