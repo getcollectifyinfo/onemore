@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum GameState { aiming, dead, frozen }
+enum GameState { aiming, dead }
 
 class OneMoreGame extends FlameGame with TapCallbacks {
   static const double baseSpeed = 240.0;
@@ -41,7 +41,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   double _ghostTapOpacity = 0.0;
   bool _ghostTapShown = false;
   double _ghostTapTimer = 0.0;
-  double _freezeTimer = 0.0;
+  double _nearMissDelayTimer = 0.0;
+  String? _pendingNearMissText;
   GameState state = GameState.aiming;
   String? nearMissText;
 
@@ -148,7 +149,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _ghostTapOpacity = 0.0;
     _ghostTapShown = false;
     _ghostTapTimer = 0.0;
-    _freezeTimer = 0.0;
+    _nearMissDelayTimer = 0.0;
+    _pendingNearMissText = null;
     arrowY = size.y * 0.9;
     targetY = size.y * 0.5;
   }
@@ -174,13 +176,14 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   void update(double dt) {
     super.update(dt);
     
-    if (state == GameState.frozen) {
-      _freezeTimer -= dt;
-      if (_freezeTimer <= 0) {
-        state = GameState.dead;
-        _updateBestScore();
+    if (state == GameState.dead) {
+      if (_nearMissDelayTimer > 0) {
+        _nearMissDelayTimer -= dt;
+        if (_nearMissDelayTimer <= 0) {
+          nearMissText = _pendingNearMissText;
+          _pendingNearMissText = null;
+        }
       }
-      return;
     }
     
     if (state == GameState.aiming) {
@@ -459,11 +462,13 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         final isEarly = dx < 0;
         final suffix = isEarly ? 'TOO EARLY' : 'TOO LATE';
         
-        nearMissText = '${timeStr}s $suffix';
+        // Schedule near miss text to appear after 300ms
+        _pendingNearMissText = '${timeStr}s $suffix';
+        _nearMissDelayTimer = 0.300;
+        nearMissText = null; // Do not show yet
         
-        // Freeze for 300ms before showing Game Over screen (increased from 120ms for visibility)
-        state = GameState.frozen;
-        _freezeTimer = 0.300;
+        state = GameState.dead;
+        _updateBestScore();
         return;
       }
       state = GameState.dead;
