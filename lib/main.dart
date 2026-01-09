@@ -461,9 +461,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         
         nearMissText = '${timeStr}s $suffix';
         
-        // Freeze for 120ms before showing Game Over screen
+        // Freeze for 300ms before showing Game Over screen (increased from 120ms for visibility)
         state = GameState.frozen;
-        _freezeTimer = 0.120;
+        _freezeTimer = 0.300;
         return;
       }
       state = GameState.dead;
