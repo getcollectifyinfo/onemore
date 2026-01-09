@@ -330,8 +330,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Render Ghost Tap
     if (_ghostTapOpacity > 0) {
       final double ghostRadius = r * 0.525;
-      final double ghostX = cx + (r * 0.9) + 30;
-      final double ghostY = cyTarget + (r * 0.6) + 10;
+      final double ghostX = cx + (r * 0.9) + 50;
+      final double ghostY = cyTarget + (r * 0.6) + 30;
       
       // Outer circle
       canvas.drawCircle(
@@ -346,7 +346,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       // Inner circle
       canvas.drawCircle(
         Offset(ghostX, ghostY),
-        ghostRadius * 0.6,
+        ghostRadius * 0.8,
         Paint()
           ..color = Colors.black.withValues(alpha: _ghostTapOpacity)
           ..style = PaintingStyle.stroke
