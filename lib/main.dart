@@ -188,20 +188,17 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       bool crossedCenter = (oldArrowX < cx && arrowX >= cx);
       
       if (crossedCenter) {
-        // Flash logic (Always active for debug)
         if (!_flashedOnce) {
-          _flashOpacity = 0.08; // 5-8% opacity
+          _flashOpacity = 0.12;
           _flashedOnce = true;
         }
         
-        // Trigger Ghost Tap
         if (!_ghostTapShown) {
-           _ghostTapOpacity = 0.07; // 5-7% opacity
+           _ghostTapOpacity = 0.14;
            _ghostTapTimer = 1.4; // 1.4s duration
            _ghostTapShown = true;
         }
       } else if (arrowX > cx + 20.0) {
-        // Reset flags when arrow moves away so it can flash again on next pass
         _flashedOnce = false;
         _ghostTapShown = false;
       }
@@ -224,8 +221,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     if (_ghostTapTimer > 0) {
       _ghostTapTimer -= dt;
       if (_ghostTapTimer > 0) {
-        // Linear fade out based on remaining time
-        _ghostTapOpacity = 0.07 * (_ghostTapTimer / 1.4);
+        _ghostTapOpacity = 0.14 * (_ghostTapTimer / 1.4);
       } else {
         _ghostTapOpacity = 0;
       }
@@ -327,7 +323,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     if (_flashOpacity > 0) {
       canvas.drawRect(
         Rect.fromLTWH(0, 0, size.x, size.y),
-        Paint()..color = Colors.white.withValues(alpha: _flashOpacity),
+        Paint()..color = Colors.black.withValues(alpha: _flashOpacity),
       );
     }
     
@@ -343,7 +339,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         Paint()
           ..color = Colors.black.withValues(alpha: _ghostTapOpacity)
           ..style = PaintingStyle.stroke
-          ..strokeWidth = 1,
+          ..strokeWidth = 2,
       );
     }
   }
