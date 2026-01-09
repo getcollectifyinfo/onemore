@@ -8,7 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-enum GameState { aiming, dead }
+enum GameState { aiming, dead, frozen }
 
 class OneMoreGame extends FlameGame with TapCallbacks {
   static const double baseSpeed = 240.0;
@@ -41,6 +41,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   double _ghostTapOpacity = 0.0;
   bool _ghostTapShown = false;
   double _ghostTapTimer = 0.0;
+  double _freezeTimer = 0.0;
   GameState state = GameState.aiming;
   String? nearMissText;
 
@@ -59,8 +60,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   final TextPaint oneMorePaint = TextPaint(
     style: GoogleFonts.inter(
-      color: Colors.black,
-      fontSize: S * 0.85,
+      color: Colors.black.withValues(alpha: 0.9),
+      fontSize: S * 0.70,
       fontWeight: FontWeight.bold,
     ),
   );
@@ -99,9 +100,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   final TextPaint nearMissPaint = TextPaint(
     style: GoogleFonts.inter(
-      color: const Color(0xFF333333), // Dark grey
-      fontSize: S * 0.45,
-      fontWeight: FontWeight.normal,
+      color: const Color(0xFF000000), // Fully opaque black
+      fontSize: S * 0.85,
+      fontWeight: FontWeight.bold,
     ),
   );
 
@@ -147,6 +148,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _ghostTapOpacity = 0.0;
     _ghostTapShown = false;
     _ghostTapTimer = 0.0;
+    _freezeTimer = 0.0;
     arrowY = size.y * 0.9;
     targetY = size.y * 0.5;
   }
@@ -172,6 +174,15 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   void update(double dt) {
     super.update(dt);
     
+    if (state == GameState.frozen) {
+      _freezeTimer -= dt;
+      if (_freezeTimer <= 0) {
+        state = GameState.dead;
+        _updateBestScore();
+      }
+      return;
+    }
+    
     if (state == GameState.aiming) {
       final cx = size.x * 0.5;
       final double oldArrowX = arrowX;
@@ -188,15 +199,17 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       bool crossedCenter = (oldArrowX < cx && arrowX >= cx);
       
       if (crossedCenter) {
-        if (!_flashedOnce) {
-          _flashOpacity = 0.12;
-          _flashedOnce = true;
-        }
-        
-        if (!_ghostTapShown) {
-           _ghostTapOpacity = 0.14;
-           _ghostTapTimer = 1.4; // 1.4s duration
-           _ghostTapShown = true;
+        if (!hasPlayed) {
+          if (!_flashedOnce) {
+            _flashOpacity = 0.12;
+            _flashedOnce = true;
+          }
+          
+          if (!_ghostTapShown) {
+             _ghostTapOpacity = 0.14;
+             _ghostTapTimer = 1.4; // 1.4s duration
+             _ghostTapShown = true;
+          }
         }
       } else if (arrowX > cx + 20.0) {
         _flashedOnce = false;
@@ -427,7 +440,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       if (!hasPlayed) {
         // Soft penalty for first run: Vibrate only, no game over, no score
         HapticFeedback.lightImpact();
-        _setHasPlayed(); // Mark as played so next miss is Game Over
+        // Mark as played ONLY on first hit, not miss.
+        // So tutorial animations persist until first hit.
         return;
       }
       
@@ -446,6 +460,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         final suffix = isEarly ? 'TOO EARLY' : 'TOO LATE';
         
         nearMissText = '${timeStr}s $suffix';
+        
+        // Freeze for 120ms before showing Game Over screen
+        state = GameState.frozen;
+        _freezeTimer = 0.120;
+        return;
       }
       state = GameState.dead;
       _updateBestScore();
