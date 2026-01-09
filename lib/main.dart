@@ -357,6 +357,10 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   @override
   void onTapDown(TapDownEvent event) {
+    if (event.canvasPosition.y >= size.y * 0.85) {
+      return;
+    }
+
     if (state == GameState.dead) {
       reset();
       return;
@@ -379,6 +383,13 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       if (!hasPlayed) {
         _setHasPlayed();
       }
+      
+      // Stop tutorial animations immediately on hit
+      _flashOpacity = 0.0;
+      _ghostTapOpacity = 0.0;
+      _ghostTapTimer = 0.0;
+      _ghostTapShown = true; // Prevent re-triggering
+      _flashedOnce = true;   // Prevent re-triggering
       
       final d = dist / effectiveR;
       int inc = 1;
