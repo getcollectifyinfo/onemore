@@ -1,8 +1,10 @@
 import 'dart:math';
+import 'dart:js' as js;
 
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -130,6 +132,22 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('hasPlayed', true);
     }
+  }
+
+  void _logScoreEvent() {
+    if (!kIsWeb) return;
+    try {
+      js.context.callMethod('gtag', [
+        'event',
+        'game_over',
+        {
+          'value': score,
+          'score': score,
+          'best_score': bestScore,
+          'hits': hits,
+        },
+      ]);
+    } catch (_) {}
   }
 
   void reset() {
@@ -469,10 +487,12 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         
         state = GameState.dead;
         _updateBestScore();
+        _logScoreEvent();
         return;
       }
       state = GameState.dead;
       _updateBestScore();
+      _logScoreEvent();
     }
   }
 
