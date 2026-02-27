@@ -24,6 +24,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   static const double pNearMid = 0.50;
   static const double pNearHigh = 0.85;
 
+  // Checkpoint & Progress constants
+  static const List<int> checkpointScores = [20, 50, 80, 100, 120, 150, 180];
+  static const int totalDots = 200;
+  static const double progressCircleRadius = 90.0;
+
   late final Random _rng;
   double t = 0;
   double phaseOffset = 0;
@@ -36,6 +41,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   int score = 0;
   double effectiveScore = 0;
   int bestScore = 0;
+  
+  // Checkpoint state
+  int lastCheckpointScore = 0;
+  double lastCheckpointEffectiveScore = 0;
+
   int hits = 0;
   bool hasPlayed = false;
   double _flashOpacity = 0.0;
@@ -152,8 +162,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   void reset() {
     state = GameState.aiming;
-    score = 0;
-    effectiveScore = 0;
+    score = lastCheckpointScore;
+    effectiveScore = lastCheckpointEffectiveScore;
     hits = 0;
     t = 0;
     phaseOffset = _rng.nextDouble() * pi * 3; // Range expanded to [0, 3π]
@@ -281,6 +291,52 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
     canvas.save();
     canvas.translate(cx, cyTarget);
+    
+    // Draw Progress Circle (Dots)
+    const double progressCircleRadius = OneMoreGame.progressCircleRadius;
+    const double angleStep = (2 * pi) / OneMoreGame.totalDots;
+    // Start from top (-pi/2)
+    const double startAngle = -pi / 2;
+
+    for (int i = 0; i < OneMoreGame.totalDots; i++) {
+      final double angle = startAngle + (i * angleStep);
+      final double dotX = progressCircleRadius * cos(angle);
+      final double dotY = progressCircleRadius * sin(angle);
+      
+      // Determine if this dot is active (score based)
+      // i=0 corresponds to score 1
+      final int dotScore = i + 1;
+      final bool isActive = score >= dotScore;
+      
+      // Determine if this dot is a checkpoint
+      final bool isCheckpoint = OneMoreGame.checkpointScores.contains(dotScore);
+      
+      if (isCheckpoint) {
+        // Draw Checkpoint Circle
+        // Hollow if not reached, filled if reached
+        final bool isReached = score >= dotScore;
+        
+        canvas.drawCircle(
+          Offset(dotX, dotY),
+          4.0, // Radius for checkpoint dot
+          Paint()
+            ..color = isReached ? const Color(0xFF333333) : const Color(0xFFBBBBBB)
+            ..style = isReached ? PaintingStyle.fill : PaintingStyle.stroke
+            ..strokeWidth = 1.5,
+        );
+      } else {
+        // Regular dot
+        canvas.drawCircle(
+          Offset(dotX, dotY),
+          1.5, // Radius for regular dot
+          Paint()
+            ..color = isActive 
+                ? const Color(0xFF333333) // Dark Gray for active
+                : const Color(0xFFE0E0E0), // Very Light Gray for inactive
+        );
+      }
+    }
+
     canvas.scale(popScale, popScale);
     canvas.drawCircle(Offset.zero, r, targetPaint);
     canvas.restore();
@@ -297,6 +353,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Layout constants
     const double S = OneMoreGame.S;
     const double radiusStart = OneMoreGame.radiusStart;
+    const double progressRadius = OneMoreGame.progressCircleRadius;
     
     const double oneMoreFontSize = S * 0.85;
     const double bestFontSize = S * 0.55;
@@ -309,13 +366,17 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Distance from Target Top to One More Bottom = S * 0.9
     // Target Top = CenterY - radiusStart
     // One More Bottom = (CenterY - radiusStart) - (S * 0.9)
-    final double oneMoreY = (centerY - radiusStart) - (S * 0.9);
+    // Move slightly higher to clear the progress circle
+    // Increased gap from 1.5 * S to 2.5 * S
+    final double oneMoreY = (centerY - progressRadius) - (S * 2.5);
     
     // SCORE (Fixed Anchor - Bottom)
     // Distance from Target Bottom to Score Top = S
     // Target Bottom = CenterY + radiusStart
     // Score Top = (CenterY + radiusStart) + S
-    final double scoreY = (centerY + radiusStart) + S;
+    // Adjusted to be below the progress circle
+    // Increased gap from 20 to 40
+    final double scoreY = (centerY + progressRadius) + S + 40;
     
     // Near-miss (Above ONE MORE)
     final double nearMissY = oneMoreY - oneMoreFontSize - 12;
@@ -442,6 +503,15 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         effectiveScore += 0.5;
       } else {
         effectiveScore += 1.0;
+      }
+
+      // Checkpoint Logic
+      // Check if we passed any new checkpoint
+      for (final cp in checkpointScores) {
+        if (score >= cp && cp > lastCheckpointScore) {
+          lastCheckpointScore = cp;
+          lastCheckpointEffectiveScore = effectiveScore;
+        }
       }
       
       hits++;
