@@ -1,14 +1,16 @@
 import 'dart:math';
-import 'dart:js' as js;
+import 'dart:ui';
 
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'ad_manager.dart';
+import 'analytics_manager.dart';
 
 enum GameState { aiming, dead }
 
@@ -25,9 +27,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   static const double pNearHigh = 0.85;
 
   // Checkpoint & Progress constants
-  static const List<int> checkpointScores = [20, 50, 80, 100, 120, 150, 180];
+  static const List<int> checkpointScores = [20, 50, 80, 100, 120, 150, 180, 200, 230, 250, 300, 350, 400, 500];
   static const int totalDots = 200;
+  static const int totalDotsOuter = 300;
   static const double progressCircleRadius = 90.0;
+  static const double progressCircleRadiusOuter = 110.0;
 
   late final Random _rng;
   double t = 0;
@@ -145,22 +149,12 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   }
 
   void _logScoreEvent() {
-    if (!kIsWeb) return;
-    try {
-      js.context.callMethod('gtag', [
-        'event',
-        'game_over',
-        {
-          'value': score,
-          'score': score,
-          'best_score': bestScore,
-          'hits': hits,
-        },
-      ]);
-    } catch (_) {}
+    AnalyticsManager.logScore(score: score, bestScore: bestScore, hits: hits);
+    AnalyticsManager.logGameOver(score: score);
   }
 
   void reset() {
+    AnalyticsManager.logGameStart();
     state = GameState.aiming;
     score = lastCheckpointScore;
     effectiveScore = lastCheckpointEffectiveScore;
@@ -198,6 +192,35 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   double _radius() {
     return max(radiusStart - (effectiveScore * k), radiusMin);
+  }
+
+  void resumeGame() {
+    state = GameState.aiming;
+    nearMissText = null;
+    _pendingNearMissText = null;
+    _nearMissDelayTimer = 0;
+  }
+  
+  void _handleDeath() {
+    state = GameState.dead;
+    _updateBestScore();
+    _logScoreEvent();
+    
+    // Check for recovery
+    // Find next checkpoint
+    int nextCheckpoint = -1;
+    for (final cp in checkpointScores) {
+      if (cp > score) {
+        nextCheckpoint = cp;
+        break;
+      }
+    }
+    
+    // If within 3 points of next checkpoint AND score >= 20
+    if (score >= 20 && nextCheckpoint != -1 && nextCheckpoint - score <= 3) {
+      // Show ad offer
+      overlays.add('AdRecovery');
+    }
   }
 
   @override
@@ -298,6 +321,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Start from top (-pi/2)
     const double startAngle = -pi / 2;
 
+    // INNER CIRCLE (0-200)
     for (int i = 0; i < OneMoreGame.totalDots; i++) {
       final double angle = startAngle + (i * angleStep);
       final double dotX = progressCircleRadius * cos(angle);
@@ -306,7 +330,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       // Determine if this dot is active (score based)
       // i=0 corresponds to score 1
       final int dotScore = i + 1;
-      final bool isActive = score >= dotScore;
+      
+      // If score > 200, all inner dots are active
+      final bool isActive = (score > 200) || (score >= dotScore);
       
       // Determine if this dot is a checkpoint
       final bool isCheckpoint = OneMoreGame.checkpointScores.contains(dotScore);
@@ -314,7 +340,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       if (isCheckpoint) {
         // Draw Checkpoint Circle
         // Hollow if not reached, filled if reached
-        final bool isReached = score >= dotScore;
+        final bool isReached = (score > 200) || (score >= dotScore);
         
         canvas.drawCircle(
           Offset(dotX, dotY),
@@ -336,6 +362,52 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         );
       }
     }
+    
+    // OUTER CIRCLE (201-500)
+    if (score > 200 || OneMoreGame.checkpointScores.any((cp) => cp > 200 && score >= cp)) {
+      // Actually, we can just always render the outer circle structure (faded) if we want, 
+      // but usually it appears when needed. Let's show it always but inactive, or only when score > 200?
+      // User said: "oyuncu 200 ü aştığında bu dairenin çevresinde yeni bir daire oluşsun."
+      // So only render if score > 200.
+      
+      const double progressCircleRadiusOuter = OneMoreGame.progressCircleRadiusOuter;
+      const double angleStepOuter = (2 * pi) / OneMoreGame.totalDotsOuter;
+      
+      for (int i = 0; i < OneMoreGame.totalDotsOuter; i++) {
+        final double angle = startAngle + (i * angleStepOuter);
+        final double dotX = progressCircleRadiusOuter * cos(angle);
+        final double dotY = progressCircleRadiusOuter * sin(angle);
+        
+        // i=0 corresponds to score 201
+        final int dotScore = 201 + i;
+        
+        final bool isActive = score >= dotScore;
+        
+        // Checkpoints for outer circle
+        final bool isCheckpoint = OneMoreGame.checkpointScores.contains(dotScore);
+        
+        if (isCheckpoint) {
+           final bool isReached = score >= dotScore;
+           canvas.drawCircle(
+            Offset(dotX, dotY),
+            4.0, 
+            Paint()
+              ..color = isReached ? const Color(0xFF333333) : const Color(0xFFBBBBBB)
+              ..style = isReached ? PaintingStyle.fill : PaintingStyle.stroke
+              ..strokeWidth = 1.5,
+          );
+        } else {
+           canvas.drawCircle(
+            Offset(dotX, dotY),
+            1.5, 
+            Paint()
+              ..color = isActive 
+                  ? const Color(0xFF333333) 
+                  : const Color(0xFFE0E0E0), 
+          );
+        }
+      }
+    }
 
     canvas.scale(popScale, popScale);
     canvas.drawCircle(Offset.zero, r, targetPaint);
@@ -352,7 +424,6 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
     // Layout constants
     const double S = OneMoreGame.S;
-    const double radiusStart = OneMoreGame.radiusStart;
     const double progressRadius = OneMoreGame.progressCircleRadius;
     
     const double oneMoreFontSize = S * 0.85;
@@ -385,8 +456,6 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     final double bestY = scoreY + S + 8;
     
     // NEXT (Below BEST)
-    // next = ((score ~/ 10) + 1) * 10
-    final int nextScore = ((score ~/ 10) + 1) * 10;
     final double nextY = bestY + bestFontSize + 8;
     
     // Tap to try again (Below NEXT)
@@ -408,8 +477,20 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       }
       
       // Render BEST and NEXT
-      bestPaint.render(canvas, 'BEST: $bestScore', Vector2(cx, bestY), anchor: Anchor.topCenter);
-      nextPaint.render(canvas, 'NEXT: $nextScore', Vector2(cx, nextY), anchor: Anchor.topCenter);
+    bestPaint.render(canvas, 'BEST: $bestScore', Vector2(cx, bestY), anchor: Anchor.topCenter);
+    
+    // Calculate NEXT target based on checkpoints
+    int nextTarget = 500; // Default max
+    for (final cp in OneMoreGame.checkpointScores) {
+      if (cp > score) {
+        nextTarget = cp;
+        break;
+      }
+    }
+    // If score is 500 or more, we can just show 500 or "MAX"
+    if (score >= 500) nextTarget = 500;
+
+    nextPaint.render(canvas, 'NEXT: $nextTarget', Vector2(cx, nextY), anchor: Anchor.topCenter);
       
       tapToRetryPaint.render(canvas, 'tap to try again', Vector2(cx, tryAgainY), anchor: Anchor.topCenter);
     }
@@ -511,6 +592,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         if (score >= cp && cp > lastCheckpointScore) {
           lastCheckpointScore = cp;
           lastCheckpointEffectiveScore = effectiveScore;
+          AnalyticsManager.logCheckpoint(checkpoint: cp);
         }
       }
       
@@ -555,14 +637,13 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         _nearMissDelayTimer = 0.300;
         nearMissText = null; // Do not show yet
         
-        state = GameState.dead;
-        _updateBestScore();
-        _logScoreEvent();
+        AnalyticsManager.logMissMs(ms: timeDiff * 1000); // Log miss in ms
+        _handleDeath();
         return;
       }
-      state = GameState.dead;
-      _updateBestScore();
-      _logScoreEvent();
+      // Log generic miss if not near miss (timeDiff > 0.06)
+      AnalyticsManager.logMissMs(ms: timeDiff * 1000);
+      _handleDeath();
     }
   }
 
@@ -579,5 +660,141 @@ void main() async {
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,
   ]);
-  runApp(GameWidget(game: OneMoreGame()));
+
+  // Initialize Ads
+  await AdManager.instance.initialize();
+
+  runApp(
+    GameWidget<OneMoreGame>(
+      game: OneMoreGame(),
+      overlayBuilderMap: {
+        'AdRecovery': (BuildContext context, OneMoreGame game) {
+          int nextCheckpoint = -1;
+          for (final cp in OneMoreGame.checkpointScores) {
+            if (cp > game.score) {
+              nextCheckpoint = cp;
+              break;
+            }
+          }
+          final int diff = nextCheckpoint - game.score;
+
+          return BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+            child: Container(
+              color: Colors.black.withOpacity(0.6),
+              child: TweenAnimationBuilder<double>(
+                tween: Tween(begin: 0.95, end: 1.0),
+                duration: const Duration(milliseconds: 180),
+                curve: Curves.easeOut,
+                builder: (context, scale, child) {
+                  return Transform.scale(
+                    scale: scale,
+                    child: child,
+                  );
+                },
+                child: Center(
+                  child: Container(
+                    width: 320,
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(24),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 20,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          diff == 1 ? '1 POINT AWAY' : 'SO CLOSE',
+                          style: const TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.black,
+                            fontFamily: 'Inter',
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'Continue and secure checkpoint $nextCheckpoint?',
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            fontSize: 15,
+                            color: Colors.black87,
+                            height: 1.4,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        SizedBox(
+                          width: double.infinity,
+                          child: ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.black,
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            onPressed: () {
+                              game.overlays.remove('AdRecovery');
+                              AdManager.instance.showRewardedAd(
+                                onUserEarnedReward: () {
+                                  game.resumeGame();
+                                },
+                                onAdDismissed: () {
+                                  // Stay dead
+                                },
+                                onAdFailed: (error) {
+                                  // Stay dead
+                                },
+                              );
+                            },
+                            child: const Text(
+                              'Continue (Watch 1 Video)',
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        TextButton(
+                          style: TextButton.styleFrom(
+                            foregroundColor: Colors.grey,
+                            padding: EdgeInsets.zero,
+                            minimumSize: Size.zero,
+                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          ),
+                          onPressed: () {
+                            game.overlays.remove('AdRecovery');
+                          },
+                          child: const Text(
+                            'No thanks',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      },
+    ),
+  );
 }
