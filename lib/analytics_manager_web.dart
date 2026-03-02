@@ -7,20 +7,7 @@ class AnalyticsManager {
     required int bestScore,
     required int hits,
   }) {
-    if (!kIsWeb) return;
-    try {
-      context.callMethod('gtag', [
-        'event',
-        'score',
-        JsObject.jsify({
-          'value': score,
-          'score': score,
-          'best_score': bestScore,
-          'hits': hits,
-        }),
-      ]);
-      debugPrint('Analytics: score event sent (web).');
-    } catch (_) {}
+    // Deprecated: score is now part of game_over event
   }
 
   static void logGameStart() {
@@ -35,17 +22,19 @@ class AnalyticsManager {
     } catch (_) {}
   }
 
-  static void logGameOver({required int score}) {
+  static void logGameOver({required int score, int? missMs}) {
     if (!kIsWeb) return;
     try {
+      final Map<String, dynamic> params = {'score': score};
+      if (missMs != null) {
+        params['miss_ms'] = missMs;
+      }
       context.callMethod('gtag', [
         'event',
         'game_over',
-        JsObject.jsify({
-          'score': score,
-        }),
+        JsObject.jsify(params),
       ]);
-      debugPrint('Analytics: game_over event sent (web).');
+      debugPrint('Analytics: game_over event sent (web). Params: $params');
     } catch (_) {}
   }
 
@@ -64,17 +53,7 @@ class AnalyticsManager {
   }
 
   static void logMissMs({required double ms}) {
-    if (!kIsWeb) return;
-    try {
-      context.callMethod('gtag', [
-        'event',
-        'miss_ms',
-        JsObject.jsify({
-          'value': ms,
-        }),
-      ]);
-      debugPrint('Analytics: miss_ms event sent (web).');
-    } catch (_) {}
+    // Deprecated: miss_ms is now part of game_over event
   }
 }
 

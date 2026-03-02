@@ -39,6 +39,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   double arrowX = 0;
   double arrowY = 0;
   double targetY = 0;
+  double _currentRange = 100.0;
   int _popCountdown = 0;
   int _scorePopCountdown = 0;
   String? _lastScoreText;
@@ -148,9 +149,12 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     }
   }
 
-  void _logScoreEvent() {
-    AnalyticsManager.logScore(score: score, bestScore: bestScore, hits: hits);
-    AnalyticsManager.logGameOver(score: score);
+  void _logScoreEvent(double? missSeconds) {
+    int? missMsInt;
+    if (missSeconds != null) {
+      missMsInt = (missSeconds * 1000).round();
+    }
+    AnalyticsManager.logGameOver(score: score, missMs: missMsInt);
   }
 
   void reset() {
@@ -161,7 +165,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     hits = 0;
     t = 0;
     phaseOffset = _rng.nextDouble() * pi * 3; // Range expanded to [0, 3π]
-    arrowX = 0;
+    _currentRange = 100.0 + _rng.nextDouble() * 50.0; // Random range between 100 and 150
+    arrowX = size.x * 0.5 - _currentRange;
     _popCountdown = 0;
     _scorePopCountdown = 0;
     _lastScoreText = null;
@@ -174,7 +179,14 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _nearMissDelayTimer = 0.0;
     _pendingNearMissText = null;
     arrowY = size.y * 0.9;
-    targetY = size.y * 0.5;
+    targetY = size.y * 0.5 - 100.0;
+  }
+
+  @override
+  void onGameResize(Vector2 size) {
+    super.onGameResize(size);
+    targetY = size.y * 0.5 - 100.0;
+    arrowY = size.y * 0.9;
   }
 
   double _speed() {
@@ -201,10 +213,10 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _nearMissDelayTimer = 0;
   }
   
-  void _handleDeath() {
+  void _handleDeath(double? missSeconds) {
     state = GameState.dead;
     _updateBestScore();
-    _logScoreEvent();
+    _logScoreEvent(missSeconds);
     
     // Check for recovery
     // Find next checkpoint
@@ -239,12 +251,19 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     
     if (state == GameState.aiming) {
       final cx = size.x * 0.5;
+      final startX = cx - _currentRange;
+      final endX = cx + _currentRange;
       final double oldArrowX = arrowX;
       
       final v = _speed();
       arrowX += v * dt;
-      if (arrowX > size.x) {
-        arrowX -= size.x;
+      if (arrowX > endX) {
+        arrowX = startX + (arrowX - endX);
+        // Randomize range for next pass
+        _currentRange = 100.0 + _rng.nextDouble() * 50.0;
+      }
+      if (arrowX < startX) {
+        arrowX = startX;
       }
       
       // Check if arrow crossed the center in this frame
@@ -430,8 +449,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     const double bestFontSize = S * 0.55;
     const double nextFontSize = S * 0.60;
     
-    // Reference Point: CenterY = screenHeight * 0.5
-    final double centerY = size.y * 0.5;
+    // Reference Point: CenterY (shifted up)
+    final double centerY = targetY; 
     
     // ONE MORE (Fixed Anchor - Top)
     // Distance from Target Top to One More Bottom = S * 0.9
@@ -637,13 +656,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         _nearMissDelayTimer = 0.300;
         nearMissText = null; // Do not show yet
         
-        AnalyticsManager.logMissMs(ms: timeDiff * 1000); // Log miss in ms
-        _handleDeath();
+        _handleDeath(timeDiff);
         return;
       }
       // Log generic miss if not near miss (timeDiff > 0.06)
-      AnalyticsManager.logMissMs(ms: timeDiff * 1000);
-      _handleDeath();
+      _handleDeath(timeDiff);
     }
   }
 

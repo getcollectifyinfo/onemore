@@ -14,8 +14,8 @@ class AnalyticsManager {
     debugPrint('Analytics: logGameStart called (mobile).');
   }
 
-  static void logGameOver({required int score}) {
-    debugPrint('Analytics: logGameOver called (mobile).');
+  static void logGameOver({required int score, int? missMs}) {
+    debugPrint('Analytics: logGameOver called (mobile). Params: score=$score, missMs=$missMs');
   }
 
   static void logCheckpoint({required int checkpoint}) {

@@ -13,8 +13,8 @@ class AnalyticsManager {
     debugPrint('Analytics: logGameStart called (stub).');
   }
 
-  static void logGameOver({required int score}) {
-    debugPrint('Analytics: logGameOver called (stub).');
+  static void logGameOver({required int score, int? missMs}) {
+    debugPrint('Analytics: logGameOver called (stub). Params: score=$score, missMs=$missMs');
   }
 
   static void logCheckpoint({required int checkpoint}) {
