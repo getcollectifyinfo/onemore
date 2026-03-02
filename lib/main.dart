@@ -1,18 +1,24 @@
+import 'dart:io';
 import 'dart:math';
-import 'dart:ui';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
 import 'package:flame/events.dart';
 import 'package:flame/game.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ad_manager.dart';
 import 'analytics_manager.dart';
 
-enum GameState { aiming, dead }
+enum GameState { aiming, firing, dead }
 
 class OneMoreGame extends FlameGame with TapCallbacks {
   static const double baseSpeed = 240.0;
@@ -62,6 +68,17 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   String? _pendingNearMissText;
   GameState state = GameState.aiming;
   String? nearMissText;
+
+  // Firing state
+  double _firingStartY = 0;
+  double _firingTargetY = 0;
+  double _firingProgress = 0;
+  bool _isNearMiss = false;
+  bool _wasHit = false;
+  // Pending results
+  int _pendingScoreInc = 0;
+  double _pendingEffectiveScoreInc = 0;
+  double? _pendingMissSeconds;
 
   final Paint bg = Paint()..color = const Color(0xFFFFFFFF);
   final Paint fg = Paint()..color = const Color(0xFF000000);
@@ -159,6 +176,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   void reset() {
     AnalyticsManager.logGameStart();
+    overlays.remove('ShareButton');
+    overlays.remove('AdRecovery'); // Ensure AdRecovery is gone
     state = GameState.aiming;
     score = lastCheckpointScore;
     effectiveScore = lastCheckpointEffectiveScore;
@@ -178,7 +197,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _ghostTapTimer = 0.0;
     _nearMissDelayTimer = 0.0;
     _pendingNearMissText = null;
-    arrowY = size.y * 0.9;
+    arrowY = size.y * 0.85;
     targetY = size.y * 0.5 - 100.0;
   }
 
@@ -208,15 +227,20 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   void resumeGame() {
     state = GameState.aiming;
+    arrowY = size.y * 0.85; // Reset arrow position
     nearMissText = null;
     _pendingNearMissText = null;
     _nearMissDelayTimer = 0;
+    overlays.remove('ShareButton');
   }
   
   void _handleDeath(double? missSeconds) {
     state = GameState.dead;
     _updateBestScore();
     _logScoreEvent(missSeconds);
+    
+    // Always show share button on death
+    overlays.add('ShareButton');
     
     // Check for recovery
     // Find next checkpoint
@@ -249,6 +273,103 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       }
     }
     
+    if (state == GameState.firing) {
+      // Animation logic
+      double speed = 5.0; // Base speed multiplier (1/duration)
+      
+      // If near miss, slow down as we approach target
+      if (_isNearMiss) {
+        // Normal speed until 70%, then slow down
+        if (_firingProgress > 0.6) {
+          speed = 0.5; // Very slow
+        } else {
+          speed = 6.0; // Fast initial
+        }
+      } else {
+        // Normal shot
+        speed = 8.0; // Very fast
+      }
+      
+      _firingProgress += dt * speed;
+      
+      if (_firingProgress >= 1.0) {
+        _firingProgress = 1.0;
+        // Hit logic applied
+        if (_wasHit) {
+           score += _pendingScoreInc;
+           effectiveScore += _pendingEffectiveScoreInc;
+           
+           // Checkpoint Logic
+           for (final cp in checkpointScores) {
+             if (score >= cp && cp > lastCheckpointScore) {
+               lastCheckpointScore = cp;
+               lastCheckpointEffectiveScore = effectiveScore;
+               AnalyticsManager.logCheckpoint(checkpoint: cp);
+             }
+           }
+           
+           hits++;
+           
+           // Pop effect
+           _popCountdown = 2;
+           
+           // Score text
+           _lastScoreText = null;
+           if (_pendingScoreInc > 1 && score >= 15 && _rng.nextDouble() < 0.25) {
+             _lastScoreText = '+$_pendingScoreInc';
+             _scorePopCountdown = 9;
+           } else {
+             _scorePopCountdown = 0;
+           }
+           
+           // Reset arrow
+           arrowY = _firingStartY;
+           state = GameState.aiming;
+           
+           // Randomize range for next pass immediately?
+           // The update loop will handle movement.
+           
+        } else {
+          // Miss
+          arrowY = _firingTargetY; // Stay at target visually?
+          // Or keep it there.
+          
+          if (!hasPlayed) {
+             // Soft penalty for first run
+             HapticFeedback.lightImpact();
+             state = GameState.aiming;
+             arrowY = _firingStartY;
+             return;
+          }
+          
+          _setHasPlayed();
+          
+          // Near miss text logic
+          if (_pendingMissSeconds != null && score >= 5 && _pendingMissSeconds! < 0.15) {
+             // Logic from previous implementation
+             final timeStr = _pendingMissSeconds!.toStringAsFixed(3);
+             // We need dx to know if early or late.
+             // We can re-calculate dx or store it.
+             // Let's just use generic text for now or re-calc.
+             final cx = size.x * 0.5;
+             final dx = arrowX - cx;
+             final isEarly = dx < 0; // Wait, arrowX is moving? No, arrowX is frozen during firing.
+             final suffix = isEarly ? 'TOO EARLY' : 'TOO LATE';
+             
+             _pendingNearMissText = '${timeStr}s $suffix';
+             _nearMissDelayTimer = 0.300;
+          }
+          
+          _handleDeath(_pendingMissSeconds);
+        }
+      } else {
+        // Update arrowY
+        // Interpolate from start to target
+        arrowY = _firingStartY + (_firingTargetY - _firingStartY) * _firingProgress;
+      }
+      return; // Skip aiming update logic
+    }
+
     if (state == GameState.aiming) {
       final cx = size.x * 0.5;
       final startX = cx - _currentRange;
@@ -560,21 +681,39 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       reset();
       return;
     }
+    
+    if (state != GameState.aiming) {
+      return;
+    }
 
+    // Transition to Firing State
+    state = GameState.firing;
+    _firingStartY = arrowY;
+    // Target Y is the center of the target. We want arrow to stop there.
+    _firingTargetY = targetY; 
+    _firingProgress = 0.0;
+    
+    // Pre-calculate result
     final cx = size.x * 0.5;
     final dx = arrowX - cx;
-
     final double visualR = _radius();
-    // effectiveRadius = visualRadius * (1 - microBias)
-    // microBias ∈ [0, 0.15]
-    // Increases slowly with score (approx max at score 60)
     final double microBias = clamp(score * 0.002, 0.0, 0.15);
     final double effectiveR = visualR * (1 - microBias);
-    
     final dist = dx.abs();
     
-    if (dist <= effectiveR) {
-      // Successful hit
+    _wasHit = (dist <= effectiveR);
+    
+    // Determine if it's a near miss
+    // Near miss: Missed, but close to the edge (e.g., within 25px or 1.5x radius)
+    // Using a fixed threshold or relative one.
+    // Let's say if dist is within effectiveR + 25.0.
+    if (!_wasHit && dist <= effectiveR + 25.0) {
+      _isNearMiss = true;
+    } else {
+      _isNearMiss = false;
+    }
+
+    if (_wasHit) {
       if (!hasPlayed) {
         _setHasPlayed();
       }
@@ -583,8 +722,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       _flashOpacity = 0.0;
       _ghostTapOpacity = 0.0;
       _ghostTapTimer = 0.0;
-      _ghostTapShown = true; // Prevent re-triggering
-      _flashedOnce = true;   // Prevent re-triggering
+      _ghostTapShown = true; 
+      _flashedOnce = true;
       
       final d = dist / effectiveR;
       int inc = 1;
@@ -594,73 +733,34 @@ class OneMoreGame extends FlameGame with TapCallbacks {
         inc = 2;
       }
       
-      score += inc;
+      _pendingScoreInc = inc;
       
       // Update effectiveScore based on difficulty rules
-      if (score <= 10) {
-        // No increase
-      } else if (score <= 30) {
-        effectiveScore += 0.5;
+      if (score + inc <= 10) {
+        _pendingEffectiveScoreInc = 0;
+      } else if (score + inc <= 30) {
+        _pendingEffectiveScoreInc = 0.5;
       } else {
-        effectiveScore += 1.0;
-      }
-
-      // Checkpoint Logic
-      // Check if we passed any new checkpoint
-      for (final cp in checkpointScores) {
-        if (score >= cp && cp > lastCheckpointScore) {
-          lastCheckpointScore = cp;
-          lastCheckpointEffectiveScore = effectiveScore;
-          AnalyticsManager.logCheckpoint(checkpoint: cp);
-        }
+        _pendingEffectiveScoreInc = 1.0;
       }
       
-      hits++;
-      
-      _lastScoreText = null;
-      // Condition: inc > 1 (never show +1), score >= 15, ~25% chance
-      if (inc > 1 && score >= 15 && _rng.nextDouble() < 0.25) {
-        _lastScoreText = '+$inc';
-        _scorePopCountdown = 9; // ~150ms at 60fps
-      } else {
-        _scorePopCountdown = 0;
-      }
+      _pendingMissSeconds = null;
 
-      _popCountdown = 2;
     } else {
-      // Miss logic
-      if (!hasPlayed) {
-        // Soft penalty for first run: Vibrate only, no game over, no score
-        HapticFeedback.lightImpact();
-        // Mark as played ONLY on first hit, not miss.
-        // So tutorial animations persist until first hit.
-        return;
+      // Miss
+      final missDist = dist - effectiveR;
+      final missPx = missDist;
+      final speed = _speed().abs();
+      // approximate time missed by
+      final missSeconds = missPx / speed;
+      _pendingMissSeconds = missSeconds;
+      
+      // Near miss text logic can be pre-calculated here or kept in update?
+      // Let's keep existing logic but apply it when animation finishes
+      
+      if (score >= 5 && missSeconds < 0.15) { // ~9 frames at 60fps
+         // This logic was for text display, can be reused
       }
-      
-      _setHasPlayed(); // Ensure it's marked (redundant but safe)
-      
-      final margin = dist - effectiveR;
-      nearMissText = null;
-      
-      final speed = _speed();
-      final timeDiff = margin / speed;
-      
-      if (timeDiff <= 0.06) {
-        final timeStr = timeDiff.toStringAsFixed(3);
-        
-        final isEarly = dx < 0;
-        final suffix = isEarly ? 'TOO EARLY' : 'TOO LATE';
-        
-        // Schedule near miss text to appear after 300ms
-        _pendingNearMissText = '${timeStr}s $suffix';
-        _nearMissDelayTimer = 0.300;
-        nearMissText = null; // Do not show yet
-        
-        _handleDeath(timeDiff);
-        return;
-      }
-      // Log generic miss if not near miss (timeDiff > 0.06)
-      _handleDeath(timeDiff);
     }
   }
 
@@ -681,137 +781,215 @@ void main() async {
   // Initialize Ads
   await AdManager.instance.initialize();
 
-  runApp(
-    GameWidget<OneMoreGame>(
-      game: OneMoreGame(),
-      overlayBuilderMap: {
-        'AdRecovery': (BuildContext context, OneMoreGame game) {
-          int nextCheckpoint = -1;
-          for (final cp in OneMoreGame.checkpointScores) {
-            if (cp > game.score) {
-              nextCheckpoint = cp;
-              break;
-            }
-          }
-          final int diff = nextCheckpoint - game.score;
+  runApp(const MaterialApp(
+    debugShowCheckedModeBanner: false,
+    home: GameScreen(),
+  ));
+}
 
-          return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
-            child: Container(
-              color: Colors.black.withOpacity(0.6),
-              child: TweenAnimationBuilder<double>(
-                tween: Tween(begin: 0.95, end: 1.0),
-                duration: const Duration(milliseconds: 180),
-                curve: Curves.easeOut,
-                builder: (context, scale, child) {
-                  return Transform.scale(
-                    scale: scale,
-                    child: child,
-                  );
-                },
-                child: Center(
-                  child: Container(
-                    width: 320,
-                    padding: const EdgeInsets.all(32),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(24),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.1),
-                          blurRadius: 20,
-                          offset: const Offset(0, 10),
+class GameScreen extends StatefulWidget {
+  const GameScreen({super.key});
+
+  @override
+  State<GameScreen> createState() => _GameScreenState();
+}
+
+class _GameScreenState extends State<GameScreen> {
+  final GlobalKey _globalKey = GlobalKey();
+  final OneMoreGame _game = OneMoreGame();
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: RepaintBoundary(
+        key: _globalKey,
+        child: GameWidget<OneMoreGame>(
+          game: _game,
+          overlayBuilderMap: {
+            'AdRecovery': (BuildContext context, OneMoreGame game) {
+              int nextCheckpoint = -1;
+              for (final cp in OneMoreGame.checkpointScores) {
+                if (cp > game.score) {
+                  nextCheckpoint = cp;
+                  break;
+                }
+              }
+              final int diff = nextCheckpoint - game.score;
+
+              return BackdropFilter(
+                filter: ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                child: Container(
+                  color: Colors.black.withOpacity(0.6),
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween(begin: 0.95, end: 1.0),
+                    duration: const Duration(milliseconds: 180),
+                    curve: Curves.easeOut,
+                    builder: (context, scale, child) {
+                      return Transform.scale(
+                        scale: scale,
+                        child: child,
+                      );
+                    },
+                    child: Center(
+                      child: Container(
+                        width: 320,
+                        padding: const EdgeInsets.all(32),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(24),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withOpacity(0.1),
+                              blurRadius: 20,
+                              offset: const Offset(0, 10),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          diff == 1 ? '1 POINT AWAY' : 'SO CLOSE',
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.black,
-                            fontFamily: 'Inter',
-                            letterSpacing: -0.5,
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Continue and secure checkpoint $nextCheckpoint?',
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            fontSize: 15,
-                            color: Colors.black87,
-                            height: 1.4,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                        const SizedBox(height: 24),
-                        SizedBox(
-                          width: double.infinity,
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.black,
-                              foregroundColor: Colors.white,
-                              elevation: 0,
-                              padding: const EdgeInsets.symmetric(vertical: 18),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              diff == 1 ? '1 POINT AWAY' : 'SO CLOSE',
+                              style: const TextStyle(
+                                fontSize: 24,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.black,
+                                fontFamily: 'Inter',
+                                letterSpacing: -0.5,
                               ),
                             ),
-                            onPressed: () {
-                              game.overlays.remove('AdRecovery');
-                              AdManager.instance.showRewardedAd(
-                                onUserEarnedReward: () {
-                                  game.resumeGame();
-                                },
-                                onAdDismissed: () {
-                                  // Stay dead
-                                },
-                                onAdFailed: (error) {
-                                  // Stay dead
-                                },
-                              );
-                            },
-                            child: const Text(
-                              'Continue (Watch 1 Video)',
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
+                            const SizedBox(height: 12),
+                            Text(
+                              'Continue and secure checkpoint $nextCheckpoint?',
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(
+                                fontSize: 15,
+                                color: Colors.black87,
+                                height: 1.4,
+                                fontWeight: FontWeight.w500,
                               ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                        TextButton(
-                          style: TextButton.styleFrom(
-                            foregroundColor: Colors.grey,
-                            padding: EdgeInsets.zero,
-                            minimumSize: Size.zero,
-                            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ),
-                          onPressed: () {
-                            game.overlays.remove('AdRecovery');
-                          },
-                          child: const Text(
-                            'No thanks',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
+                            const SizedBox(height: 24),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.black,
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  padding: const EdgeInsets.symmetric(vertical: 18),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                ),
+                                onPressed: () {
+                                  game.overlays.remove('AdRecovery');
+                                  AdManager.instance.showRewardedAd(
+                                    onUserEarnedReward: () {
+                                      game.resumeGame();
+                                    },
+                                    onAdDismissed: () {
+                                      // Stay dead
+                                    },
+                                    onAdFailed: (error) {
+                                      // Stay dead
+                                    },
+                                  );
+                                },
+                                child: const Text(
+                                  'Continue (Watch 1 Video)',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 12),
+                            TextButton(
+                              style: TextButton.styleFrom(
+                                foregroundColor: Colors.grey,
+                                padding: EdgeInsets.zero,
+                                minimumSize: Size.zero,
+                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              ),
+                              onPressed: () {
+                                game.overlays.remove('AdRecovery');
+                              },
+                              child: const Text(
+                                'No thanks',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-            ),
-          );
-        },
-      },
-    ),
-  );
+              );
+            },
+            'ShareButton': (BuildContext context, OneMoreGame game) {
+              return Positioned(
+                top: 60,
+                right: 20,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withOpacity(0.1),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.ios_share, color: Colors.black), // iOS style share is very recognizable
+                    onPressed: _captureAndShare,
+                    tooltip: 'Share Score',
+                  ),
+                ),
+              );
+            },
+          },
+        ),
+      ),
+    );
+  }
+
+  Future<void> _captureAndShare() async {
+    try {
+      final RenderRepaintBoundary boundary = _globalKey.currentContext!
+          .findRenderObject() as RenderRepaintBoundary;
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+      
+      if (byteData != null) {
+        final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+        if (kIsWeb) {
+           final XFile file = XFile.fromData(
+              pngBytes,
+              mimeType: 'image/png',
+              name: 'onemore_score.png',
+            );
+            await Share.shareXFiles([file], text: 'Can you beat my score in One More?');
+        } else {
+            final directory = await getTemporaryDirectory();
+            final File imgFile = File('${directory.path}/onemore_score.png');
+            await imgFile.writeAsBytes(pngBytes);
+
+            final XFile file = XFile(imgFile.path);
+            await Share.shareXFiles([file], text: 'Can you beat my score in One More?');
+        }
+      }
+    } catch (e) {
+      debugPrint('Error sharing: $e');
+    }
+  }
 }
