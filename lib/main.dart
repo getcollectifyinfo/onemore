@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flame/components.dart';
@@ -79,6 +78,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   int _pendingScoreInc = 0;
   double _pendingEffectiveScoreInc = 0;
   double? _pendingMissSeconds;
+  bool _pendingEarly = false;
+  
+  // Safety flags
+  double _timeSinceDeath = 0;
+  bool isSharing = false;
 
   final Paint bg = Paint()..color = const Color(0xFFFFFFFF);
   final Paint fg = Paint()..color = const Color(0xFF000000);
@@ -130,6 +134,15 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       color: Colors.black,
       fontSize: S * 0.60,
       fontWeight: FontWeight.w600,
+    ),
+  );
+
+  final TextPaint brandingPaint = TextPaint(
+    style: GoogleFonts.inter(
+      color: Colors.black.withValues(alpha: 0.4),
+      fontSize: S * 0.45,
+      fontWeight: FontWeight.w600,
+      letterSpacing: 0.5,
     ),
   );
 
@@ -236,6 +249,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
   
   void _handleDeath(double? missSeconds) {
     state = GameState.dead;
+    _timeSinceDeath = 0;
     _updateBestScore();
     _logScoreEvent(missSeconds);
     
@@ -264,6 +278,10 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     super.update(dt);
     
     if (state == GameState.dead) {
+      // Force arrow to stay at target visually
+      arrowY = targetY;
+      
+      _timeSinceDeath += dt;
       if (_nearMissDelayTimer > 0) {
         _nearMissDelayTimer -= dt;
         if (_nearMissDelayTimer <= 0) {
@@ -279,8 +297,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       
       // If near miss, slow down as we approach target
       if (_isNearMiss) {
-        // Normal speed until 70%, then slow down
-        if (_firingProgress > 0.6) {
+        // Normal speed until 50%, then slow down
+        if (_firingProgress > 0.5) {
           speed = 0.5; // Very slow
         } else {
           speed = 6.0; // Fast initial
@@ -331,32 +349,17 @@ class OneMoreGame extends FlameGame with TapCallbacks {
            
         } else {
           // Miss
-          arrowY = _firingTargetY; // Stay at target visually?
-          // Or keep it there.
-          
-          if (!hasPlayed) {
-             // Soft penalty for first run
-             HapticFeedback.lightImpact();
-             state = GameState.aiming;
-             arrowY = _firingStartY;
-             return;
-          }
+          arrowY = targetY; // Stay at target visually
           
           _setHasPlayed();
           
           // Near miss text logic
-          if (_pendingMissSeconds != null && score >= 5 && _pendingMissSeconds! < 0.15) {
-             // Logic from previous implementation
+          if (_pendingMissSeconds != null) {
              final timeStr = _pendingMissSeconds!.toStringAsFixed(3);
-             // We need dx to know if early or late.
-             // We can re-calculate dx or store it.
-             // Let's just use generic text for now or re-calc.
-             final cx = size.x * 0.5;
-             final dx = arrowX - cx;
-             final isEarly = dx < 0; // Wait, arrowX is moving? No, arrowX is frozen during firing.
-             final suffix = isEarly ? 'TOO EARLY' : 'TOO LATE';
+             const suffix = 's'; // Simplified
              
-             _pendingNearMissText = '${timeStr}s $suffix';
+             final label = _pendingEarly ? 'EARLY' : 'LATE';
+             _pendingNearMissText = '$label\n$timeStr$suffix';
              _nearMissDelayTimer = 0.300;
           }
           
@@ -449,7 +452,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     
     // Target opacity logic
     final Paint targetPaint = (state == GameState.dead) 
-        ? (Paint()..color = fg.color.withValues(alpha: 0.8)) 
+        ? (Paint()..color = fg.color.withValues(alpha: 0.6)) 
         : fg;
 
     canvas.save();
@@ -553,14 +556,32 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     canvas.drawCircle(Offset.zero, r, targetPaint);
     canvas.restore();
 
-    const double arrowW = 6;
-    const double arrowH = 40.0;
-    final Rect arrowRect = Rect.fromCenter(
-      center: Offset(arrowX, cyArrow),
-      width: arrowW,
-      height: arrowH,
-    );
-    canvas.drawRect(arrowRect, fg);
+    const double arrowW = 4.0;
+    const double headW = 6.0;
+    const double headH = 6.0;
+    const double totalH = 40.0;
+
+    final Path arrowPath = Path();
+    // Arrow tip is at top
+    final double tipY = cyArrow - (totalH / 2);
+    final double headBottomY = tipY + headH;
+    final double tailY = cyArrow + (totalH / 2);
+
+    // Draw Triangle Tip
+    arrowPath.moveTo(arrowX, tipY);
+    arrowPath.lineTo(arrowX - (headW / 2), headBottomY);
+    arrowPath.lineTo(arrowX + (headW / 2), headBottomY);
+    arrowPath.close();
+
+    // Draw Body
+    arrowPath.addRect(Rect.fromLTRB(
+      arrowX - (arrowW / 2),
+      headBottomY,
+      arrowX + (arrowW / 2),
+      tailY
+    ));
+
+    canvas.drawPath(arrowPath, fg);
 
     // Layout constants
     const double S = OneMoreGame.S;
@@ -600,6 +621,9 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     
     // Tap to try again (Below NEXT)
     final double tryAgainY = nextY + nextFontSize + 24;
+    
+    // Branding (Bottom of screen)
+    final double brandingY = size.y - S - 12;
 
     scorePaint.render(canvas, '$score', Vector2(cx, scoreY), anchor: Anchor.topCenter);
     
@@ -633,6 +657,8 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     nextPaint.render(canvas, 'NEXT: $nextTarget', Vector2(cx, nextY), anchor: Anchor.topCenter);
       
       tapToRetryPaint.render(canvas, 'tap to try again', Vector2(cx, tryAgainY), anchor: Anchor.topCenter);
+      
+      brandingPaint.render(canvas, 'try onemore.now', Vector2(cx, brandingY), anchor: Anchor.bottomCenter);
     }
     
     // Render flash overlay if active
@@ -673,11 +699,15 @@ class OneMoreGame extends FlameGame with TapCallbacks {
 
   @override
   void onTapDown(TapDownEvent event) {
+    if (isSharing) return;
+
     if (event.canvasPosition.y >= size.y * 0.85) {
       return;
     }
 
     if (state == GameState.dead) {
+      if (overlays.isActive('AdRecovery')) return;
+
       reset();
       return;
     }
@@ -696,6 +726,7 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     // Pre-calculate result
     final cx = size.x * 0.5;
     final dx = arrowX - cx;
+    _pendingEarly = dx < 0; // True if left of center (early), False if right (late)
     final double visualR = _radius();
     final double microBias = clamp(score * 0.002, 0.0, 0.15);
     final double effectiveR = visualR * (1 - microBias);
@@ -704,16 +735,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
     _wasHit = (dist <= effectiveR);
     
     // Determine if it's a near miss
-    // Near miss: Missed, but close to the edge (e.g., within 25px or 1.5x radius)
-    // Using a fixed threshold or relative one.
-    // Let's say if dist is within effectiveR + 25.0.
-    if (!_wasHit && dist <= effectiveR + 25.0) {
-      _isNearMiss = true;
-    } else {
-      _isNearMiss = false;
-    }
-
+    // Near miss: Missed, but VERY close (missSeconds < 0.01s)
+    
     if (_wasHit) {
+      _isNearMiss = false;
+      
       if (!hasPlayed) {
         _setHasPlayed();
       }
@@ -755,11 +781,11 @@ class OneMoreGame extends FlameGame with TapCallbacks {
       final missSeconds = missPx / speed;
       _pendingMissSeconds = missSeconds;
       
-      // Near miss text logic can be pre-calculated here or kept in update?
-      // Let's keep existing logic but apply it when animation finishes
-      
-      if (score >= 5 && missSeconds < 0.15) { // ~9 frames at 60fps
-         // This logic was for text display, can be reused
+      // Check for near miss condition (strict)
+      if (missSeconds < 0.050) {
+        _isNearMiss = true;
+      } else {
+        _isNearMiss = false;
       }
     }
   }
@@ -819,7 +845,7 @@ class _GameScreenState extends State<GameScreen> {
               return BackdropFilter(
                 filter: ui.ImageFilter.blur(sigmaX: 5, sigmaY: 5),
                 child: Container(
-                  color: Colors.black.withOpacity(0.6),
+                  color: Colors.black.withValues(alpha: 0.6),
                   child: TweenAnimationBuilder<double>(
                     tween: Tween(begin: 0.95, end: 1.0),
                     duration: const Duration(milliseconds: 180),
@@ -839,7 +865,7 @@ class _GameScreenState extends State<GameScreen> {
                           borderRadius: BorderRadius.circular(24),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.1),
+                              color: Colors.black.withValues(alpha: 0.1),
                               blurRadius: 20,
                               offset: const Offset(0, 10),
                             ),
@@ -937,19 +963,27 @@ class _GameScreenState extends State<GameScreen> {
                 top: 60,
                 right: 20,
                 child: Container(
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     color: Colors.white,
                     shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black, width: 3),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withOpacity(0.1),
-                        blurRadius: 8,
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 4,
                         offset: const Offset(0, 2),
                       ),
                     ],
                   ),
                   child: IconButton(
-                    icon: const Icon(Icons.ios_share, color: Colors.black), // iOS style share is very recognizable
+                    padding: EdgeInsets.zero,
+                    icon: Image.asset(
+                      'assets/images/share.png',
+                      width: 24,
+                      height: 24,
+                    ),
                     onPressed: _captureAndShare,
                     tooltip: 'Share Score',
                   ),
@@ -963,33 +997,49 @@ class _GameScreenState extends State<GameScreen> {
   }
 
   Future<void> _captureAndShare() async {
+    _game.isSharing = true;
     try {
+      // Hide share button before capture
+      _game.overlays.remove('ShareButton');
+      
+      // Wait for a frame to ensure the overlay is removed from the visual tree
+      await Future.delayed(const Duration(milliseconds: 50));
+
       final RenderRepaintBoundary boundary = _globalKey.currentContext!
           .findRenderObject() as RenderRepaintBoundary;
       final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
-      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
       
+      // Show share button again
+      _game.overlays.add('ShareButton');
+
+      final ByteData? byteData = await image.toByteData(format: ui.ImageByteFormat.png);
+
       if (byteData != null) {
         final Uint8List pngBytes = byteData.buffer.asUint8List();
 
         if (kIsWeb) {
-           final XFile file = XFile.fromData(
-              pngBytes,
-              mimeType: 'image/png',
-              name: 'onemore_score.png',
-            );
-            await Share.shareXFiles([file], text: 'Can you beat my score in One More?');
-        } else {
-            final directory = await getTemporaryDirectory();
-            final File imgFile = File('${directory.path}/onemore_score.png');
-            await imgFile.writeAsBytes(pngBytes);
+             final XFile file = XFile.fromData(
+                pngBytes,
+                mimeType: 'image/png',
+                name: 'onemore_score.png',
+              );
+              await SharePlus.instance.share(ShareParams(files: [file], text: 'Can you beat my score in One More?'));
+          } else {
+              final directory = await getTemporaryDirectory();
+              final File imgFile = File('${directory.path}/onemore_score.png');
+              await imgFile.writeAsBytes(pngBytes);
 
-            final XFile file = XFile(imgFile.path);
-            await Share.shareXFiles([file], text: 'Can you beat my score in One More?');
-        }
+              final XFile file = XFile(imgFile.path);
+              await SharePlus.instance.share(ShareParams(files: [file], text: 'Can you beat my score in One More?'));
+          }
       }
     } catch (e) {
       debugPrint('Error sharing: $e');
+      if (!_game.overlays.isActive('ShareButton')) {
+         _game.overlays.add('ShareButton');
+      }
+    } finally {
+      _game.isSharing = false;
     }
   }
 }

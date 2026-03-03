@@ -1,3 +1,5 @@
+// ignore_for_file: deprecated_member_use, avoid_web_libraries_in_flutter
+
 import 'dart:js';
 import 'package:flutter/foundation.dart';
 
@@ -48,12 +50,7 @@ class AnalyticsManager {
           'value': checkpoint,
         }),
       ]);
-      debugPrint('Analytics: checkpoint event sent (web).');
+      debugPrint('Analytics: checkpoint event sent (web). Value: $checkpoint');
     } catch (_) {}
   }
-
-  static void logMissMs({required double ms}) {
-    // Deprecated: miss_ms is now part of game_over event
-  }
 }
-
